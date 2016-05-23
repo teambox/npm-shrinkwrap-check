@@ -7,7 +7,7 @@ var diff = require('array-difference'),
     fs = require('fs'),
     optimist = require('optimist'),
     semver = require('semver'),
-    exec = require('child_process').execSync,
+    exec = require('child_process').exec,
     semverSatisfied = true,
     argv,
     packageJSON,
@@ -34,88 +34,94 @@ function loadJSON(path) {
   return json || null;
 }
 
-var npm_major_version = exec('npm -v').toString().match(/^(\d)\./)[1];
-
-argv = optimist
-  .usage('Ensure package.json and npm-shrinkwrap.json are in sync')
-  .alias('d', 'dev')
-  .alias('h', 'help')
-  .alias('3', 'v3')
-  .describe('3', 'Perform check taking npm3 flat structure into account.')
-  .describe('d', 'Check devDependencies.')
-  .describe('h', 'Show this help message.')
-  .argv;
-
-if (argv.help) {
-  optimist.showHelp();
-  process.exit(0);
-}
-
-packageJSON = loadJSON(process.cwd() + '/package.json');
-shrinkwrapJSON = loadJSON(process.cwd() + '/npm-shrinkwrap.json');
-
-if (!packageJSON || !shrinkwrapJSON) {
-  process.exit(1);
-}
-
-packageDeps = Object.keys(packageJSON.dependencies || []);
-
-if (argv.dev) {
-  packageDevDeps = Object.keys(packageJSON.devDependencies || []);
-  packageDeps = packageDeps.concat(packageDevDeps);
-}
-
-if (npm_major_version === '3' && !argv.v3) {
-  console.warn(chalk.yellow('WARNING: Looks like you are using npm3, consider using -3 flag.\n'));
-}
-
-// for npm@3
-if (argv.v3) {
-  glob.sync(process.cwd() + "/node_modules/**/package.json").forEach(function(pkgPath) {
-    var pkg = loadJSON(pkgPath);
-    var deps = Object.keys(pkg.dependencies || []);
-    packageDeps = packageDeps.concat(deps);
-  });
-}
-
-packageDeps = uniq(packageDeps);
-shrinkwrapDeps = Object.keys(shrinkwrapJSON.dependencies || []);
-
-depDiff = diff(packageDeps, shrinkwrapDeps);
-
-if (depDiff.length) {
-  var notInShrinkwrap,
-      notInPackage;
-
-  process.stderr.write('package.json and npm-shrinkwrap.json out of sync\n');
-
-  notInPackage = depDiff.filter(function(dependency) {
-    return (packageDeps.indexOf(dependency) === -1);
-  });
-
-  notInShrinkwrap = depDiff.filter(function(dependency) {
-    return (shrinkwrapDeps.indexOf(dependency) === -1);
-  });
-
-  notInShrinkwrap.map(function (dependency) {
-    process.stderr.write(' * ' + dependency + ' found in package.json but not in npm-shrinkwrap.json\n');
-  });
-
-  notInPackage.map(function (dependency) {
-    process.stderr.write(' * ' + dependency + ' found in npm-shrinkwrap.json but not in package.json\n');
-  });
-}
-
-packageDeps.forEach(function(dependency) {
-  var range = packageJSON.dependencies[dependency] ||
-        (argv.dev && packageJSON.devDependencies && packageJSON.devDependencies[dependency]);
-  if (!range) return; // sub dependencies
-  var version = (shrinkwrapJSON.dependencies[dependency] || {}).version;
-
-  if (version && semver.validRange(range) && !semver.satisfies(version, range)) {
-    semverSatisfied = false;
-    process.stderr.write(' * ' + dependency + '@' + version + ' in npm-shrinkwrap.json does not satisfy range ' + range + ' in package.json\n');
+exec('npm -v', function (err, stdout) {
+  if (err) {
+    throw err;
   }
-});
 
-process.exit(+(depDiff.length !== 0 || !semverSatisfied));
+  var npm_major_version = stdout.toString().match(/^(\d)\./)[1];
+
+  argv = optimist
+    .usage('Ensure package.json and npm-shrinkwrap.json are in sync')
+    .alias('d', 'dev')
+    .alias('h', 'help')
+    .alias('3', 'v3')
+    .describe('3', 'Perform check taking npm3 flat structure into account.')
+    .describe('d', 'Check devDependencies.')
+    .describe('h', 'Show this help message.')
+    .argv;
+
+  if (argv.help) {
+    optimist.showHelp();
+    process.exit(0);
+  }
+
+  packageJSON = loadJSON(process.cwd() + '/package.json');
+  shrinkwrapJSON = loadJSON(process.cwd() + '/npm-shrinkwrap.json');
+
+  if (!packageJSON || !shrinkwrapJSON) {
+    process.exit(1);
+  }
+
+  packageDeps = Object.keys(packageJSON.dependencies || []);
+
+  if (argv.dev) {
+    packageDevDeps = Object.keys(packageJSON.devDependencies || []);
+    packageDeps = packageDeps.concat(packageDevDeps);
+  }
+
+  if (npm_major_version === '3' && !argv.v3) {
+    console.warn(chalk.yellow('WARNING: Looks like you are using npm3, consider using -3 flag.\n'));
+  }
+
+  // for npm@3
+  if (argv.v3) {
+    glob.sync(process.cwd() + "/node_modules/**/package.json").forEach(function(pkgPath) {
+      var pkg = loadJSON(pkgPath);
+      var deps = Object.keys(pkg.dependencies || []);
+      packageDeps = packageDeps.concat(deps);
+    });
+  }
+
+  packageDeps = uniq(packageDeps);
+  shrinkwrapDeps = Object.keys(shrinkwrapJSON.dependencies || []);
+
+  depDiff = diff(packageDeps, shrinkwrapDeps);
+
+  if (depDiff.length) {
+    var notInShrinkwrap,
+        notInPackage;
+
+    process.stderr.write('package.json and npm-shrinkwrap.json out of sync\n');
+
+    notInPackage = depDiff.filter(function(dependency) {
+      return (packageDeps.indexOf(dependency) === -1);
+    });
+
+    notInShrinkwrap = depDiff.filter(function(dependency) {
+      return (shrinkwrapDeps.indexOf(dependency) === -1);
+    });
+
+    notInShrinkwrap.map(function (dependency) {
+      process.stderr.write(' * ' + dependency + ' found in package.json but not in npm-shrinkwrap.json\n');
+    });
+
+    notInPackage.map(function (dependency) {
+      process.stderr.write(' * ' + dependency + ' found in npm-shrinkwrap.json but not in package.json\n');
+    });
+  }
+
+  packageDeps.forEach(function(dependency) {
+    var range = packageJSON.dependencies[dependency] ||
+          (argv.dev && packageJSON.devDependencies && packageJSON.devDependencies[dependency]);
+    if (!range) return; // sub dependencies
+    var version = (shrinkwrapJSON.dependencies[dependency] || {}).version;
+
+    if (version && semver.validRange(range) && !semver.satisfies(version, range)) {
+      semverSatisfied = false;
+      process.stderr.write(' * ' + dependency + '@' + version + ' in npm-shrinkwrap.json does not satisfy range ' + range + ' in package.json\n');
+    }
+  });
+
+  process.exit(+(depDiff.length !== 0 || !semverSatisfied));
+});
