@@ -56,11 +56,13 @@ argv = optimist
   .alias('3', 'v3')
   .alias('v', 'verbose')
   .alias('V', 'version')
+  .alias('a', 'allowEmpty')
   .describe('3', 'Perform check taking npm3 flat structure into account.')
   .describe('d', 'Check devDependencies.')
   .describe('h', 'Show this help message.')
   .describe('v', 'Run in verbose mode')
   .describe('V', 'Outputs version')
+  .describe('a', 'Allow empty or dummy package.json files')
   .argv;
 
 if (argv.version) {
@@ -90,6 +92,12 @@ packagePeerDeps = readKeys(packageJSON.peerDependencies);
 
 glob.sync(process.cwd() + "/**/node_modules/*/package.json").forEach(function(pkgPath) {
   var pkg = loadJSON(pkgPath);
+  
+  // bail out in case we encounter a dummy package.json
+  if (argv.allowEmpty && (!pkg || !pkg.dependencies)) {
+      return;
+  }
+  
   var thisPackageDeps = readKeys(pkg.dependencies);
   var isValidPath = every(
                       pkgPath
