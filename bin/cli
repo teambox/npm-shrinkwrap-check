@@ -92,6 +92,7 @@ glob.sync(process.cwd() + "/**/node_modules/*/package.json").forEach(function(pk
   var pkg = loadJSON(pkgPath);
   
   // bail out in case we encounter a dummy package.json
+  // or one with no dependencies
   if (!pkg || !pkg.dependencies) {
       return;
   }
