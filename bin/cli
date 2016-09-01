@@ -10,7 +10,7 @@ var xor = require('lodash.xor'),
     fs = require('fs'),
     optimist = require('optimist'),
     semver = require('semver'),
-    exec = require('child_process').execSync,
+    exec = require('child_process').exec,
     semverSatisfied = true,
     argv,
     packageJSON,
@@ -47,178 +47,184 @@ function readKeys(object) {
   return Object.keys(object || {}) || [];
 }
 
-var npm_major_version = exec('npm -v').toString().match(/^(\d)\./)[1];
-
-argv = optimist
-  .usage('Ensure package.json and npm-shrinkwrap.json are in sync')
-  .alias('d', 'dev')
-  .alias('h', 'help')
-  .alias('3', 'v3')
-  .alias('v', 'verbose')
-  .alias('V', 'version')
-  .describe('3', 'Perform check taking npm3 flat structure into account.')
-  .describe('d', 'Check devDependencies.')
-  .describe('h', 'Show this help message.')
-  .describe('v', 'Run in verbose mode')
-  .describe('V', 'Outputs version')
-  .argv;
-
-if (argv.version) {
-  process.stdout.write('npm-shrinwrap-check ' + loadJSON(__dirname + '/../package.json').version)
-  process.exit(0);
-}
-
-if (argv.help) {
-  optimist.showHelp();
-  process.exit(0);
-}
-
-packageJSON = loadJSON(process.cwd() + '/package.json');
-shrinkwrapJSON = loadJSON(process.cwd() + '/npm-shrinkwrap.json');
-
-if (!packageJSON || !shrinkwrapJSON) {
-  process.exit(1);
-}
-
-packageDeps = uniq([].concat(
-  readKeys(packageJSON.dependencies),
-  argv.dev ? readKeys(packageJSON.devDependencies) : []
-));
-
-packageOptionalDeps = readKeys(packageJSON.optionalDependencies);
-packagePeerDeps = readKeys(packageJSON.peerDependencies);
-
-glob.sync(process.cwd() + "/**/node_modules/*/package.json", {follow: true}).forEach(function(pkgPath) {
-  var pkg = loadJSON(pkgPath);
-  var thisPackageDeps = readKeys(pkg.dependencies);
-  var isValidPath = every(
-                      pkgPath
-                        .replace(process.cwd(), '')
-                        .replace(/^\//, '')
-                        .split('/').map(function (segment, i) {
-                          return segment === 'node_modules' ? i % 2 === 0 : true
-                        })
-                    );
-
-  if (!isValidPath) {
-    return;
+exec('npm -v', function(err, stdout) {
+  if(err) {
+     throw err;
   }
 
-  var thisPackageOptionalDeps = readKeys(pkg.optionalDependencies);
-  var thisPackagePeerDeps = readKeys(pkg.peerDependencies);
+  var npm_major_version = stdout.toString().match(/^(\d)\./)[1];
 
-  var optionalButNotReallyOptionalDeps;
-  var peerButNotReallyPeerDeps;
+  argv = optimist
+    .usage('Ensure package.json and npm-shrinkwrap.json are in sync')
+    .alias('d', 'dev')
+    .alias('h', 'help')
+    .alias('3', 'v3')
+    .alias('v', 'verbose')
+    .alias('V', 'version')
+    .describe('3', 'Perform check taking npm3 flat structure into account.')
+    .describe('d', 'Check devDependencies.')
+    .describe('h', 'Show this help message.')
+    .describe('v', 'Run in verbose mode')
+    .describe('V', 'Outputs version')
+    .argv;
 
-  if (argv.v3) {
-    packageDeps = packageDeps.concat(thisPackageDeps);
+  if (argv.version) {
+    process.stdout.write('npm-shrinwrap-check ' + loadJSON(__dirname + '/../package.json').version)
+    process.exit(0);
+  }
 
-    if (!!pkg.name) {
-      packageDeps = packageDeps.concat(pkg.name);
+  if (argv.help) {
+    optimist.showHelp();
+    process.exit(0);
+  }
+
+  packageJSON = loadJSON(process.cwd() + '/package.json');
+  shrinkwrapJSON = loadJSON(process.cwd() + '/npm-shrinkwrap.json');
+
+  if (!packageJSON || !shrinkwrapJSON) {
+    process.exit(1);
+  }
+
+  packageDeps = uniq([].concat(
+    readKeys(packageJSON.dependencies),
+    argv.dev ? readKeys(packageJSON.devDependencies) : []
+  ));
+
+  packageOptionalDeps = readKeys(packageJSON.optionalDependencies);
+  packagePeerDeps = readKeys(packageJSON.peerDependencies);
+
+  glob.sync(process.cwd() + "/**/node_modules/*/package.json", {follow: true}).forEach(function(pkgPath) {
+    var pkg = loadJSON(pkgPath);
+    var thisPackageDeps = readKeys(pkg.dependencies);
+    var isValidPath = every(
+                        pkgPath
+                          .replace(process.cwd(), '')
+                          .replace(/^\//, '')
+                          .split('/').map(function (segment, i) {
+                            return segment === 'node_modules' ? i % 2 === 0 : true
+                          })
+                      );
+
+    if (!isValidPath) {
+      return;
     }
+
+    var thisPackageOptionalDeps = readKeys(pkg.optionalDependencies);
+    var thisPackagePeerDeps = readKeys(pkg.peerDependencies);
+
+    var optionalButNotReallyOptionalDeps;
+    var peerButNotReallyPeerDeps;
+
+    if (argv.v3) {
+      packageDeps = packageDeps.concat(thisPackageDeps);
+
+      if (!!pkg.name) {
+        packageDeps = packageDeps.concat(pkg.name);
+      }
+    }
+
+    foundOptionalDeps = foundOptionalDeps.concat(thisPackageOptionalDeps);
+    foundPeerDeps = foundPeerDeps.concat(thisPackagePeerDeps);
+
+    optionalButNotReallyOptionalDeps = intersection(
+      foundOptionalDeps,
+      difference(thisPackageDeps, thisPackageOptionalDeps)
+    );
+
+    peerButNotReallypeerDeps = intersection(
+      foundPeerDeps,
+      difference(thisPackageDeps, thisPackagePeerDeps)
+    );
+
+    foundOptionalDeps = difference(foundOptionalDeps, optionalButNotReallyOptionalDeps);
+    foundPeerDeps = difference(foundPeerDeps, peerButNotReallyPeerDeps);
+  });
+
+  function walkDeps(node, acc) {
+    acc = acc || [];
+
+    if (node.dependencies) {
+      readKeys(node.dependencies).forEach(function (depName) {
+        var depNode = node.dependencies[depName];
+        acc.push(depName);
+        walkDeps(depNode, acc);
+      });
+    }
+
+    return uniq(acc);
   }
 
-  foundOptionalDeps = foundOptionalDeps.concat(thisPackageOptionalDeps);
-  foundPeerDeps = foundPeerDeps.concat(thisPackagePeerDeps);
+  packageDeps = uniq(packageDeps);
+  shrinkwrapDeps = argv.v3 ?
+                     walkDeps(shrinkwrapJSON) :
+                     readKeys(shrinkwrapJSON.dependencies);
 
-  optionalButNotReallyOptionalDeps = intersection(
+  foundOptionalDeps = uniq(foundOptionalDeps);
+  foundPeerDeps = uniq(foundPeerDeps);
+  ignoredDeps = uniq([].concat(
     foundOptionalDeps,
-    difference(thisPackageDeps, thisPackageOptionalDeps)
-  );
-
-  peerButNotReallypeerDeps = intersection(
     foundPeerDeps,
-    difference(thisPackageDeps, thisPackagePeerDeps)
-  );
+    packagePeerDeps,
+    packageOptionalDeps
+  ));
 
-  foundOptionalDeps = difference(foundOptionalDeps, optionalButNotReallyOptionalDeps);
-  foundPeerDeps = difference(foundPeerDeps, peerButNotReallyPeerDeps);
-});
+  // Removing optionalDeps
+  packageDeps = difference(packageDeps, ignoredDeps);
+  shrinkwrapDeps = difference(shrinkwrapDeps, ignoredDeps);
 
-function walkDeps(node, acc) {
-  acc = acc || [];
+  depDiff = xor(packageDeps, shrinkwrapDeps);
+  depDiffCount = Math.abs(depDiff.length);
 
-  if (node.dependencies) {
-    readKeys(node.dependencies).forEach(function (depName) {
-      var depNode = node.dependencies[depName];
-      acc.push(depName);
-      walkDeps(depNode, acc);
+  if (depDiff.length) {
+    var notInShrinkwrap,
+        notInPackage;
+
+    process.stderr.write(chalk.red('package.json and npm-shrinkwrap.json out of sync\n'));
+
+    notInPackage = depDiff.filter(function(dependency) {
+      return (packageDeps.indexOf(dependency) === -1);
+    });
+
+    notInShrinkwrap = depDiff.filter(function(dependency) {
+      return (shrinkwrapDeps.indexOf(dependency) === -1);
+    });
+
+    notInShrinkwrap.map(function (dependency) {
+      process.stderr.write(chalk.yellow(' * ' + dependency + ' found in package.json but not in npm-shrinkwrap.json\n'));
+    });
+
+    notInPackage.map(function (dependency) {
+      process.stdout.write(chalk.yellow(' * ' + dependency + ' found in npm-shrinkwrap.json but not in package.json\n'));
+    });
+  }  else {
+    process.stdout.write(chalk.green('OK! package.json and npm-shrinkwrap.json are in sync\n'));
+  }
+
+  packageDeps.forEach(function(dependency) {
+    var range = (packageJSON.dependencies && packageJSON.dependencies[dependency]) ||
+          (argv.dev && packageJSON.devDependencies && packageJSON.devDependencies[dependency]);
+    if (!range) return; // sub dependencies
+    var version = (shrinkwrapJSON.dependencies[dependency] || {}).version;
+
+    if (version && semver.validRange(range) && !semver.satisfies(version, range)) {
+      semverSatisfied = false;
+      process.stderr.write(' * ' + dependency + '@' + version + ' in npm-shrinkwrap.json does not satisfy range ' + range + ' in package.json\n');
+    }
+  });
+
+  if (argv.verbose) {
+    [].concat(foundOptionalDeps, packageOptionalDeps).forEach(function (dependency) {
+      console.warn(chalk.yellow('WARN: skipping check for optional dependency ' + dependency));
+    });
+
+    [].concat(foundPeerDeps, packagePeerDeps).forEach(function (dependency) {
+      console.warn(chalk.yellow('WARN: skipping check for peer dependency ' + dependency));
     });
   }
 
-  return uniq(acc);
-}
-
-packageDeps = uniq(packageDeps);
-shrinkwrapDeps = argv.v3 ?
-                   walkDeps(shrinkwrapJSON) :
-                   readKeys(shrinkwrapJSON.dependencies);
-
-foundOptionalDeps = uniq(foundOptionalDeps);
-foundPeerDeps = uniq(foundPeerDeps);
-ignoredDeps = uniq([].concat(
-  foundOptionalDeps,
-  foundPeerDeps,
-  packagePeerDeps,
-  packageOptionalDeps
-));
-
-// Removing optionalDeps
-packageDeps = difference(packageDeps, ignoredDeps);
-shrinkwrapDeps = difference(shrinkwrapDeps, ignoredDeps);
-
-depDiff = xor(packageDeps, shrinkwrapDeps);
-depDiffCount = Math.abs(depDiff.length);
-
-if (depDiff.length) {
-  var notInShrinkwrap,
-      notInPackage;
-
-  process.stderr.write(chalk.red('package.json and npm-shrinkwrap.json out of sync\n'));
-
-  notInPackage = depDiff.filter(function(dependency) {
-    return (packageDeps.indexOf(dependency) === -1);
-  });
-
-  notInShrinkwrap = depDiff.filter(function(dependency) {
-    return (shrinkwrapDeps.indexOf(dependency) === -1);
-  });
-
-  notInShrinkwrap.map(function (dependency) {
-    process.stderr.write(chalk.yellow(' * ' + dependency + ' found in package.json but not in npm-shrinkwrap.json\n'));
-  });
-
-  notInPackage.map(function (dependency) {
-    process.stdout.write(chalk.yellow(' * ' + dependency + ' found in npm-shrinkwrap.json but not in package.json\n'));
-  });
-}  else {
-  process.stdout.write(chalk.green('OK! package.json and npm-shrinkwrap.json are in sync\n'));
-}
-
-packageDeps.forEach(function(dependency) {
-  var range = (packageJSON.dependencies && packageJSON.dependencies[dependency]) ||
-        (argv.dev && packageJSON.devDependencies && packageJSON.devDependencies[dependency]);
-  if (!range) return; // sub dependencies
-  var version = (shrinkwrapJSON.dependencies[dependency] || {}).version;
-
-  if (version && semver.validRange(range) && !semver.satisfies(version, range)) {
-    semverSatisfied = false;
-    process.stderr.write(' * ' + dependency + '@' + version + ' in npm-shrinkwrap.json does not satisfy range ' + range + ' in package.json\n');
+  if (npm_major_version === '3' && !argv.v3) {
+    console.warn(chalk.yellow('WARN: Looks like you are using npm3, consider using -3 flag.\n'));
   }
+
+  process.exit(+(depDiffCount !== 0 || !semverSatisfied));
 });
-
-if (argv.verbose) {
-  [].concat(foundOptionalDeps, packageOptionalDeps).forEach(function (dependency) {
-    console.warn(chalk.yellow('WARN: skipping check for optional dependency ' + dependency));
-  });
-
-  [].concat(foundPeerDeps, packagePeerDeps).forEach(function (dependency) {
-    console.warn(chalk.yellow('WARN: skipping check for peer dependency ' + dependency));
-  });
-}
-
-if (npm_major_version === '3' && !argv.v3) {
-  console.warn(chalk.yellow('WARN: Looks like you are using npm3, consider using -3 flag.\n'));
-}
-
-process.exit(+(depDiffCount !== 0 || !semverSatisfied));
