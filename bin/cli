@@ -96,7 +96,13 @@ glob.sync(process.cwd() + "/**/node_modules/*/package.json", {follow: true}).for
                         .replace(process.cwd(), '')
                         .replace(/^\//, '')
                         .split('/').map(function (segment, i) {
-                          return segment === 'node_modules' ? i % 2 === 0 : true
+                          if (segment === 'test') {
+                            return false;
+                          }
+                          if (segment === 'node_modules') {
+                            return i % 2 === 0;
+                          }
+                          return true;
                         })
                     );
 
