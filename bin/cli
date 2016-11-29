@@ -90,6 +90,13 @@ packagePeerDeps = readKeys(packageJSON.peerDependencies);
 
 glob.sync(process.cwd() + "/**/node_modules/*/package.json", {follow: true}).forEach(function(pkgPath) {
   var pkg = loadJSON(pkgPath);
+  
+  // bail out in case we encounter a dummy package.json
+  // or one with no dependencies
+  if (!pkg || !pkg.dependencies) {
+      return;
+  }
+  
   var thisPackageDeps = readKeys(pkg.dependencies);
   var isValidPath = every(
                       pkgPath
